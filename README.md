@@ -2,7 +2,7 @@
 
 Eine kleine Web-App, mit der du deine Geräte und dein Training über **mehrere Fitnessstudios** hinweg trackst – ohne die einzelnen Studio-Apps.
 
-**Live:** https://tigraef.github.io/gym/
+**Live:** https://tigraef.github.io/Gym/
 
 ## Funktionen
 - **Studios** anlegen und pro Studio die **Geräte** erfassen (nach Kategorie, mit Einstellungen wie Sitzhöhe).
