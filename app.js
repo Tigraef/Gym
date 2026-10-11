@@ -267,7 +267,7 @@ function machineCard(m) {
     <span class="chev">›</span></a>`;
 }
 
-function machineDialog(studio, machine) {
+function machineDialog(studio, machine, qrCode = null) {
   const others = db.machines.filter((m) => m.studioId !== studio.id);
   const otherStudios = db.studios.filter((s) => others.some((m) => m.studioId === s.id));
   const linkSelect = !machine && others.length ? `
@@ -282,6 +282,7 @@ function machineDialog(studio, machine) {
 
   openDialog(`
     <h3>${machine ? 'Gerät bearbeiten' : 'Neues Gerät'}</h3>
+    ${qrCode ? '<p class="muted" style="margin:0;font-size:.85rem">📷 Der gescannte QR-Code wird diesem Gerät zugeordnet.</p>' : ''}
     <label for="f-name">Name</label>
     <input id="f-name" name="name" required maxlength="80" value="${esc(machine?.name)}" placeholder="z. B. Beinpresse" autocomplete="off">
     <div class="suggest" id="suggest"></div>
@@ -310,6 +311,10 @@ function machineDialog(studio, machine) {
       db.machines.push(m);
       const target = fd.get('link') && machineById(fd.get('link'));
       if (target) linkMachines(m, target);
+      if (qrCode) {
+        assignQr(m, qrCode);
+        location.hash = `#/machine/${m.id}`;
+      }
       toast(target ? 'Gerät angelegt und verbunden' : 'Gerät angelegt');
     }
     save();
@@ -404,7 +409,12 @@ function renderMachine(id) {
       <div><span class="muted">Kategorie:</span> ${esc(m.category || 'Sonstiges')}</div>
       <div><span class="muted">Einstellungen:</span> ${m.settings ? esc(m.settings) : '<span class="muted">–</span>'}</div>
       ${m.notes ? `<div class="pre" style="margin-top:6px">${esc(m.notes)}</div>` : ''}
+      <div><span class="muted">QR-Code:</span> ${qrOf(m).length ? `✓ zugeordnet${qrOf(m).length > 1 ? ` (${qrOf(m).length})` : ''}` : '<span class="muted">–</span>'}</div>
       <div class="row" style="margin-top:10px">
+        <button class="btn" id="qr-assign">📷 QR-Code ${qrOf(m).length ? 'hinzufügen' : 'zuordnen'}</button>
+        ${qrOf(m).length ? '<button class="btn danger" id="qr-remove">QR entfernen</button>' : ''}
+      </div>
+      <div class="row" style="margin-top:8px">
         <button class="btn" id="edit">Bearbeiten</button>
         <button class="btn danger" id="del">Löschen</button>
       </div>
@@ -494,12 +504,64 @@ function renderMachine(id) {
     render();
   };
   app.querySelector('#edit').onclick = () => machineDialog(studio, m);
+  app.querySelector('#qr-assign').onclick = async () => {
+    const code = await scanQr();
+    if (!code) return;
+    const owner = machinesWithQr(code).find((x) => x !== m);
+    if (qrOf(m).includes(code)) { toast('Dieser Code ist bereits zugeordnet'); return; }
+    if (owner && !confirm(`Dieser Code gehört zu „${owner.name}“ (${studioById(owner.studioId)?.name || ''}). Stattdessen diesem Gerät zuordnen?`)) return;
+    assignQr(m, code);
+    save();
+    toast('QR-Code zugeordnet');
+    render();
+  };
+  const qrRemove = app.querySelector('#qr-remove');
+  if (qrRemove) qrRemove.onclick = () => {
+    if (!confirm('QR-Zuordnung für dieses Gerät entfernen?')) return;
+    m.qrCodes = [];
+    save();
+    render();
+  };
   app.querySelector('#del').onclick = () => {
     if (!confirm(`Gerät „${m.name}“ und seine Einträge in diesem Studio löschen?`)) return;
     deleteMachine(m.id);
     save();
     location.hash = `#/studio/${m.studioId}`;
   };
+}
+
+// Auswahl eines Geräts, gruppiert nach Studio (Studio `firstStudioId` zuerst).
+function pickMachineDialog({ title, hint = '', candidates, query = '', firstStudioId = null, onPick, extra = '' }) {
+  openDialog(`
+    <h3>${esc(title)}</h3>
+    ${hint ? `<p class="muted" style="margin:0 0 8px;font-size:.9rem">${hint}</p>` : ''}
+    <input type="search" id="pick-q" placeholder="Suchen…" value="${esc(query)}">
+    <div class="pick-list" id="pick"></div>
+    ${extra}
+    <div class="actions"><button class="btn" value="cancel" formnovalidate>Abbrechen</button></div>`, null, (form) => {
+    const q = form.querySelector('#pick-q');
+    const list = form.querySelector('#pick');
+    const studios = [...db.studios].sort((a, b) => (b.id === firstStudioId) - (a.id === firstStudioId) || a.name.localeCompare(b.name, 'de'));
+    const draw = () => {
+      const nq = norm(q.value);
+      let hits = candidates.filter((c) => !nq || norm(c.name).includes(nq) || nq.includes(norm(c.name)));
+      if (!hits.length) hits = candidates;
+      list.innerHTML = studios.map((s) => {
+        const ms = hits.filter((c) => c.studioId === s.id).sort((a, b) => a.name.localeCompare(b.name, 'de'));
+        if (!ms.length) return '';
+        return `<div class="pick-group">${esc(s.name)}</div>` +
+          ms.map((c) => `<button type="button" data-id="${c.id}">${esc(c.name)}${linkedMachines(c).length > 1 ? ' 🔗' : ''}</button>`).join('');
+      }).join('');
+      list.querySelectorAll('button').forEach((b) => {
+        b.onclick = () => {
+          dialog.close();
+          onPick(machineById(b.dataset.id));
+        };
+      });
+    };
+    q.oninput = draw;
+    draw();
+  });
 }
 
 function linkDialog(m) {
@@ -509,36 +571,233 @@ function linkDialog(m) {
     toast('Keine Geräte in anderen Studios vorhanden');
     return;
   }
+  pickMachineDialog({
+    title: 'Verbinden mit …',
+    hint: 'Wähle dasselbe Gerät aus einem anderen Studio.',
+    candidates,
+    query: m.name,
+    onPick: (target) => {
+      linkMachines(m, target);
+      save();
+      toast('Geräte verbunden 🔗');
+      render();
+    },
+  });
+}
+
+// ---------- QR-Codes ----------
+
+const qrOf = (m) => m.qrCodes || [];
+const machinesWithQr = (code) => db.machines.filter((m) => qrOf(m).includes(code));
+
+function assignQr(m, code) {
+  for (const other of db.machines) {
+    if (other !== m && qrOf(other).includes(code)) other.qrCodes = qrOf(other).filter((c) => c !== code);
+  }
+  if (!qrOf(m).includes(code)) m.qrCodes = [...qrOf(m), code];
+}
+
+// Studio aus der aktuellen Ansicht (Studio- oder Geräteseite).
+function currentStudioId() {
+  const [, view, id] = (location.hash || '#/').split('/');
+  if (view === 'studio') return studioById(id) ? id : null;
+  if (view === 'machine') return machineById(id)?.studioId || null;
+  return null;
+}
+
+async function scanAndOpen() {
+  const code = await scanQr();
+  if (code) handleScannedCode(code);
+}
+
+function handleScannedCode(code) {
+  const hits = machinesWithQr(code);
+  if (hits.length === 1) {
+    location.hash = `#/machine/${hits[0].id}`;
+    return;
+  }
+  if (hits.length > 1) {
+    pickMachineDialog({ title: 'Welches Gerät?', candidates: hits, onPick: (m) => { location.hash = `#/machine/${m.id}`; } });
+    return;
+  }
+  if (!db.studios.length) {
+    toast('Lege zuerst ein Studio an');
+    return;
+  }
+  const studioId = currentStudioId();
+  const studio = studioId && studioById(studioId);
+  const shortCode = code.length > 60 ? code.slice(0, 57) + '…' : code;
   openDialog(`
-    <h3>Verbinden mit …</h3>
-    <p class="muted" style="margin:0 0 8px;font-size:.9rem">Wähle dasselbe Gerät aus einem anderen Studio.</p>
-    <input type="search" id="pick-q" placeholder="Suchen…" value="${esc(m.name)}">
-    <div class="pick-list" id="pick"></div>
+    <h3>Unbekannter QR-Code</h3>
+    <p class="muted" style="margin:0 0 4px;font-size:.9rem">Dieser Code ist noch keinem Gerät zugeordnet. Nach dem Zuordnen öffnet ein Scan direkt das Gerät.</p>
+    <p class="pre" style="font-size:.8rem;background:var(--surface-2);padding:8px;border-radius:8px">${esc(shortCode)}</p>
+    <div class="list">
+      <button class="btn block" type="button" id="qr-existing" ${db.machines.length ? '' : 'disabled'}>Vorhandenem Gerät zuordnen</button>
+      <button class="btn primary block" type="button" id="qr-new">Neues Gerät${studio ? ` in „${esc(studio.name)}“` : ''} anlegen</button>
+    </div>
     <div class="actions"><button class="btn" value="cancel" formnovalidate>Abbrechen</button></div>`, null, (form) => {
-    const q = form.querySelector('#pick-q');
-    const list = form.querySelector('#pick');
-    const draw = () => {
-      const nq = norm(q.value);
-      let hits = candidates.filter((c) => !nq || norm(c.name).includes(nq) || nq.includes(norm(c.name)));
-      if (!hits.length) hits = candidates;
-      list.innerHTML = db.studios.map((s) => {
-        const ms = hits.filter((c) => c.studioId === s.id).sort((a, b) => a.name.localeCompare(b.name, 'de'));
-        if (!ms.length) return '';
-        return `<div class="pick-group">${esc(s.name)}</div>` +
-          ms.map((c) => `<button type="button" data-id="${c.id}">${esc(c.name)}${linkedMachines(c).length > 1 ? ' 🔗' : ''}</button>`).join('');
-      }).join('');
-      list.querySelectorAll('button').forEach((b) => {
-        b.onclick = () => {
-          linkMachines(m, machineById(b.dataset.id));
+    form.querySelector('#qr-existing').onclick = () => {
+      dialog.close();
+      pickMachineDialog({
+        title: 'QR-Code zuordnen',
+        hint: 'Zu welchem Gerät gehört der Code?',
+        candidates: db.machines,
+        firstStudioId: studioId,
+        onPick: (m) => {
+          assignQr(m, code);
           save();
-          dialog.close();
-          toast('Geräte verbunden 🔗');
+          toast('QR-Code zugeordnet');
+          location.hash = `#/machine/${m.id}`;
           render();
-        };
+        },
       });
     };
-    q.oninput = draw;
-    draw();
+    form.querySelector('#qr-new').onclick = () => {
+      dialog.close();
+      if (studio) return machineDialog(studio, null, code);
+      if (db.studios.length === 1) return machineDialog(db.studios[0], null, code);
+      openDialog(`
+        <h3>In welchem Studio?</h3>
+        <div class="pick-list">${[...db.studios].sort((a, b) => a.name.localeCompare(b.name, 'de'))
+          .map((s) => `<button type="button" data-id="${s.id}">${esc(s.name)}</button>`).join('')}</div>
+        <div class="actions"><button class="btn" value="cancel" formnovalidate>Abbrechen</button></div>`, null, (f) => {
+        f.querySelectorAll('[data-id]').forEach((b) => {
+          b.onclick = () => {
+            dialog.close();
+            machineDialog(studioById(b.dataset.id), null, code);
+          };
+        });
+      });
+    };
+  });
+}
+
+let jsQRPromise = null;
+function loadJsQR() {
+  if (window.jsQR) return Promise.resolve(window.jsQR);
+  if (!jsQRPromise) {
+    jsQRPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'vendor/jsQR.js';
+      s.onload = () => resolve(window.jsQR);
+      s.onerror = () => { jsQRPromise = null; reject(new Error('jsQR nicht geladen')); };
+      document.head.appendChild(s);
+    });
+  }
+  return jsQRPromise;
+}
+
+// Liefert eine Funktion video -> Promise<string|null>.
+async function createDetector() {
+  if ('BarcodeDetector' in window) {
+    try {
+      const formats = await window.BarcodeDetector.getSupportedFormats();
+      if (formats.includes('qr_code')) {
+        const det = new window.BarcodeDetector({ formats: ['qr_code'] });
+        return async (video) => {
+          const codes = await det.detect(video);
+          return codes.length ? codes[0].rawValue : null;
+        };
+      }
+    } catch (e) { /* Fallback auf jsQR */ }
+  }
+  const jsQR = await loadJsQR();
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  return async (video) => {
+    const w = video.videoWidth, h = video.videoHeight;
+    if (!w || !h) return null;
+    const scale = Math.min(1, 720 / Math.max(w, h));
+    canvas.width = Math.round(w * scale);
+    canvas.height = Math.round(h * scale);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const res = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+    return res ? res.data : null;
+  };
+}
+
+let stopActiveScan = null;
+
+// Öffnet die Kamera und liefert den Inhalt des ersten erkannten QR-Codes (oder null).
+function scanQr() {
+  if (stopActiveScan) stopActiveScan(null);
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'scanner';
+    overlay.innerHTML = `
+      <video playsinline muted></video>
+      <div class="scan-frame"></div>
+      <div class="scan-bar">
+        <p id="scan-msg">QR-Code am Gerät in den Rahmen halten</p>
+        <div class="row">
+          <button class="btn" type="button" id="scan-manual">Code eingeben</button>
+          <button class="btn primary" type="button" id="scan-cancel">Abbrechen</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const video = overlay.querySelector('video');
+    const msg = overlay.querySelector('#scan-msg');
+    let stream = null;
+    let done = false;
+    let timer = null;
+
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+      overlay.remove();
+      stopActiveScan = null;
+      window.removeEventListener('hashchange', onHash);
+      resolve(value ? value.trim() : null);
+    };
+    const onHash = () => finish(null);
+    stopActiveScan = finish;
+    window.addEventListener('hashchange', onHash);
+    overlay.querySelector('#scan-cancel').onclick = () => finish(null);
+    overlay.querySelector('#scan-manual').onclick = () => {
+      const v = prompt('Inhalt des QR-Codes bzw. Gerätenummer:');
+      if (v && v.trim()) finish(v);
+    };
+
+    (async () => {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        msg.textContent = 'Kamera wird von diesem Browser nicht unterstützt.';
+        return;
+      }
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      } catch (e) {
+        msg.textContent = e && e.name === 'NotAllowedError'
+          ? 'Kein Kamerazugriff – bitte in den Browser-Einstellungen erlauben.'
+          : 'Kamera konnte nicht gestartet werden.';
+        return;
+      }
+      if (done) { stream.getTracks().forEach((t) => t.stop()); return; }
+      video.srcObject = stream;
+      try { await video.play(); } catch (e) { /* iOS startet trotzdem */ }
+      let detect;
+      try {
+        detect = await createDetector();
+      } catch (e) {
+        msg.textContent = 'QR-Erkennung konnte nicht geladen werden.';
+        return;
+      }
+      const tick = async () => {
+        if (done) return;
+        try {
+          const value = await detect(video);
+          if (value && value.trim()) {
+            if (navigator.vibrate) navigator.vibrate(60);
+            finish(value);
+            return;
+          }
+        } catch (e) { /* nächster Versuch */ }
+        timer = setTimeout(tick, 150);
+      };
+      tick();
+    })();
   });
 }
 
@@ -623,6 +882,7 @@ function render() {
 }
 
 window.addEventListener('hashchange', render);
+document.getElementById('scan').onclick = scanAndOpen;
 render();
 
 // Browser bitten, die Daten nicht automatisch zu löschen.

@@ -1,6 +1,6 @@
 // Stale-while-revalidate: sofort aus dem Cache (offline im Studio),
 // im Hintergrund aktualisieren, damit neue Versionen beim nächsten Start da sind.
-const CACHE = 'gymtracker-v1';
+const CACHE = 'gymtracker-v2';
 const ASSETS = [
   './',
   'index.html',
@@ -10,6 +10,7 @@ const ASSETS = [
   'icons/icon.svg',
   'icons/icon-192.png',
   'icons/icon-512.png',
+  'vendor/jsQR.js',
 ];
 
 self.addEventListener('install', (event) => {
