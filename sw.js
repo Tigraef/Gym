@@ -1,11 +1,12 @@
 // Stale-while-revalidate: sofort aus dem Cache (offline im Studio),
 // im Hintergrund aktualisieren, damit neue Versionen beim nächsten Start da sind.
-const CACHE = 'gymtracker-v2';
+const CACHE = 'gymtracker-v3';
 const ASSETS = [
   './',
   'index.html',
   'styles.css',
   'app.js',
+  'sync.js',
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',

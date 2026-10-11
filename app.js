@@ -26,11 +26,13 @@ function loadDb() {
 let db = loadDb();
 
 function save() {
+  if (typeof GymSync !== 'undefined') GymSync.stamp();
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
   } catch (e) {
     toast('Speichern fehlgeschlagen – bitte Daten exportieren!');
   }
+  if (typeof GymSync !== 'undefined') GymSync.schedule();
 }
 
 function uid() {
@@ -985,7 +987,7 @@ function renderSettings() {
   setHeader('Daten', 'Sicherung & Übertragung', '#/');
   app.innerHTML = `
     <div class="panel">
-      <p style="margin-top:0">Deine Daten werden nur in diesem Browser gespeichert:
+      <p style="margin-top:0">Deine Daten werden ${GymSync.isConfigured() ? 'in diesem Browser gespeichert und mit GitHub synchronisiert' : 'nur in diesem Browser gespeichert'}:
       <b>${db.studios.length}</b> Studios, <b>${db.machines.length}</b> Geräte, <b>${db.sessions.length}</b> Trainings.</p>
       <p class="muted" style="font-size:.9rem">Exportiere regelmäßig eine Sicherung. Mit der Datei kannst du deine Daten auch auf ein anderes Gerät übertragen.</p>
       <div class="row">
@@ -994,8 +996,12 @@ function renderSettings() {
       </div>
       <input type="file" id="file" accept="application/json,.json" hidden>
     </div>
+    ${GymSync.panelHtml()}
     <h2>Gefahrenzone</h2>
     <div class="panel"><button class="btn danger block" id="wipe">Alle Daten löschen</button></div>`;
+
+  GymSync.mountPanel(app);
+  const syncNote = GymSync.isConfigured() ? '\n\nDie Änderung wird auch auf deine anderen Geräte übertragen.' : '';
 
   app.querySelector('#export').onclick = () => {
     const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
@@ -1015,7 +1021,7 @@ function renderSettings() {
     try {
       const d = JSON.parse(await f.text());
       if (!isValidDb(d)) throw new Error('invalid');
-      if (!confirm(`Import ersetzt alle aktuellen Daten (${d.studios.length} Studios, ${d.machines.length} Geräte, ${d.sessions.length} Trainings). Fortfahren?`)) return;
+      if (!confirm(`Import ersetzt alle aktuellen Daten (${d.studios.length} Studios, ${d.machines.length} Geräte, ${d.sessions.length} Trainings). Fortfahren?${syncNote}`)) return;
       db = { ...emptyDb(), ...d };
       save();
       toast('Daten importiert');
@@ -1027,7 +1033,7 @@ function renderSettings() {
     }
   };
   app.querySelector('#wipe').onclick = () => {
-    if (!confirm('Wirklich ALLE Daten löschen? Das kann nicht rückgängig gemacht werden.')) return;
+    if (!confirm(`Wirklich ALLE Daten löschen? Das kann nicht rückgängig gemacht werden.${syncNote}`)) return;
     db = emptyDb();
     save();
     toast('Alle Daten gelöscht');
@@ -1069,6 +1075,7 @@ function render() {
 window.addEventListener('hashchange', render);
 document.getElementById('scan').onclick = scanAndOpen;
 render();
+GymSync.init();
 
 // Browser bitten, die Daten nicht automatisch zu löschen.
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
