@@ -165,3 +165,23 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
 }
 .scan-bar { position: relative; z-index: 1; padding: 14px 16px calc(14px + env(safe-area-inset-bottom)); background: var(--surface); color: var(--text); }
 .scan-bar p { margin: 0 0 10px; text-align: center; }
+
+.btn.big { min-height: 56px; font-size: 1.1rem; border-radius: 14px; }
+.start-btn { margin-top: 12px; min-height: 56px; font-size: 1.05rem; }
+.manual { margin-top: 16px; }
+.manual summary { cursor: pointer; color: var(--muted); font-weight: 600; padding: 8px 0; }
+.manual[open] summary { margin-bottom: 8px; }
+
+.big-title { font-size: 1.5rem; font-weight: 800; }
+.train-set { text-align: center; padding: 18px 14px; margin-top: 8px; }
+.stepper { margin-top: 16px; }
+.step-label { font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
+.step-row { display: grid; grid-template-columns: 64px 1fr 64px; gap: 8px; align-items: center; }
+.step-row input { text-align: center; font-size: 2rem; font-weight: 800; min-height: 64px; padding: 4px; }
+.btn.step { min-height: 64px; font-size: 1.8rem; padding: 0; }
+.train-done { text-align: center; padding: 24px 14px; margin-top: 8px; }
+.train-done .check {
+  width: 64px; height: 64px; margin: 0 auto 8px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 2rem; font-weight: 800;
+  background: var(--good); color: var(--surface);
+}

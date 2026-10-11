@@ -6,7 +6,8 @@ Eine kleine Web-App, mit der du deine Geräte und dein Training über **mehrere 
 
 ## Funktionen
 - **Studios** anlegen und pro Studio die **Geräte** erfassen (nach Kategorie, mit Einstellungen wie Sitzhöhe).
-- **Training eintragen**: Sätze mit Gewicht und Wiederholungen. Das Formular ist mit deinem letzten Training vorausgefüllt.
+- **Training am Gerät**: Beim Öffnen eines Geräts (auch per QR-Scan) fragt die App „Training auf Gerät starten“. Du siehst dann Satz für Satz Gewicht und Wiederholungen (vorgeschlagen aus deinem letzten Training), passt sie mit −/＋ an, tippst „Satz erfolgreich beendet“ und danach „Nächster Satz“. Jeder Satz wird sofort mit dem heutigen Datum gespeichert.
+- **Manuell nachtragen**: Trainings können auch nachträglich mit beliebigem Datum eingetragen werden.
 - **Geräte verbinden**: Steht dasselbe Gerät in mehreren Studios, verbindest du es. Gewichte und Wiederholungen werden dann geteilt: Steigerst du dich in einem Studio, siehst du das im anderen Studio sofort. Einstellungen bleiben pro Studio getrennt.
 - **QR-Code scannen**: Hat ein Gerät einen QR-Code, scannst du ihn einmal und ordnest ihn dem Gerät zu. Danach öffnet ein Scan (Kamera-Symbol oben) direkt die Seite dieses Geräts. Unbekannte Codes kannst du einem vorhandenen Gerät zuordnen oder gleich ein neues Gerät damit anlegen.
 - **Verlauf und Bestwert** pro Gerät (bei verbundenen Geräten über alle Studios).

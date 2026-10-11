@@ -349,9 +349,10 @@ function machineDialog(studio, machine, qrCode = null) {
 
 // ---------- Ansicht: Gerät ----------
 
-function renderMachine(id) {
+function renderMachine(id, entered = false) {
   const m = machineById(id);
   if (!m) return notFound();
+  if (entered) setTimeout(() => startTrainingPopup(m), 0);
   const studio = studioById(m.studioId);
   setHeader(m.name, studio ? studio.name : '', `#/studio/${m.studioId}`);
 
@@ -378,7 +379,10 @@ function renderMachine(id) {
         <div class="sub">${best ? `× ${best.reps} · ${fmtDate(best.date)}` : ''}</div></div>
     </div>
 
-    <h2>Training eintragen</h2>
+    <a class="btn primary block start-btn" href="#/train/${m.id}">▶ ${todaySession(m) ? `Training fortsetzen (${todaySession(m).sets.length} ${todaySession(m).sets.length === 1 ? 'Satz' : 'Sätze'} heute)` : 'Training auf Gerät starten'}</a>
+
+    <details class="manual">
+    <summary>Training manuell nachtragen</summary>
     <form class="panel" id="log">
       <label for="l-date" style="margin-top:0">Datum</label>
       <input id="l-date" type="date" name="date" value="${today()}" required>
@@ -391,6 +395,7 @@ function renderMachine(id) {
       <button class="btn primary block" style="margin-top:12px">Speichern</button>
       ${last ? `<div class="muted" style="font-size:.8rem;margin-top:8px">Vorausgefüllt mit dem letzten Training${linked ? ' (aus allen verbundenen Studios)' : ''}.</div>` : ''}
     </form>
+    </details>
 
     <h2>Verbundene Geräte</h2>
     <div class="panel">
@@ -801,6 +806,179 @@ function scanQr() {
   });
 }
 
+// ---------- Training am Gerät ----------
+
+// Heutiges Training an genau diesem Gerät (wird beim Training fortgesetzt).
+function todaySession(m) {
+  const d = today();
+  return db.sessions
+    .filter((s) => s.machineId === m.id && s.date === d)
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0] || null;
+}
+
+// Letztes Training vor dem heutigen (über alle verbundenen Geräte).
+function previousSession(m) {
+  const cur = todaySession(m);
+  return groupSessions(m).find((s) => !cur || s.id !== cur.id) || null;
+}
+
+function startTrainingPopup(m) {
+  if (dialog.open) return;
+  const cur = todaySession(m);
+  const prev = previousSession(m);
+  openDialog(`
+    <h3>${esc(m.name)}</h3>
+    ${m.settings ? `<p style="margin:0 0 4px"><span class="muted">Einstellungen:</span> ${esc(m.settings)}</p>` : ''}
+    <p class="muted" style="margin:0;font-size:.9rem">${prev ? `Letztes Mal (${fmtDate(prev.date)}): ${esc(fmtSets(prev.sets))}` : 'Noch kein Training an diesem Gerät.'}</p>
+    <div class="actions" style="flex-direction:column">
+      <button class="btn primary block big" value="ok">▶ ${cur ? `Training fortsetzen (${cur.sets.length} ${cur.sets.length === 1 ? 'Satz' : 'Sätze'})` : 'Training auf Gerät starten'}</button>
+      <button class="btn block" value="cancel" formnovalidate>Nur ansehen</button>
+    </div>`, () => {
+    location.hash = `#/train/${m.id}`;
+  });
+}
+
+let train = null; // { machineId, setNo, weight, reps, phase: 'set' | 'done' }
+
+function trainingSuggestion(m, setNo) {
+  const cur = todaySession(m);
+  const prev = previousSession(m);
+  const fromPrev = prev && (prev.sets[setNo - 1] || null);
+  const fromCur = cur && cur.sets[cur.sets.length - 1];
+  const pick = fromPrev || fromCur || (prev && prev.sets[prev.sets.length - 1]) || null;
+  return { weight: pick ? pick.weight : '', reps: pick ? pick.reps : '', prevSet: fromPrev };
+}
+
+function renderTrain(id) {
+  const m = machineById(id);
+  if (!m) return notFound();
+  const studio = studioById(m.studioId);
+  setHeader(m.name, `Training · ${studio ? studio.name : ''}`, `#/machine/${m.id}`);
+
+  const cur = todaySession(m);
+  const doneSets = cur ? cur.sets : [];
+  const setNo = doneSets.length + 1;
+  if (!train || train.machineId !== m.id || (train.phase === 'set' && train.setNo !== setNo)) {
+    const sug = trainingSuggestion(m, setNo);
+    train = { machineId: m.id, setNo, weight: sug.weight, reps: sug.reps, phase: 'set' };
+  }
+  const sug = trainingSuggestion(m, train.setNo);
+
+  const setList = doneSets.length ? `
+    <h2>Heute erledigt</h2>
+    <div class="list">${doneSets.map((s, i) => `
+      <div class="card"><div class="grow"><span class="muted">Satz ${i + 1}</span> &nbsp;<b>${fmtNum(s.weight)} kg × ${s.reps}</b></div>
+      <button class="icon-btn del" data-del-set="${i}" aria-label="Satz ${i + 1} löschen">✕</button></div>`).join('')}</div>` : '';
+
+  if (train.phase === 'done') {
+    const last = doneSets[doneSets.length - 1];
+    app.innerHTML = `
+      <div class="panel train-done">
+        <div class="check">✓</div>
+        <div class="big-title">Satz ${doneSets.length} geschafft</div>
+        ${last ? `<div class="muted">${fmtNum(last.weight)} kg × ${last.reps}</div>` : ''}
+      </div>
+      <button class="btn primary block big" id="next-set" style="margin-top:12px">Nächster Satz (${doneSets.length + 1})</button>
+      <button class="btn block" id="finish" style="margin-top:8px">Training beenden</button>
+      ${setList}`;
+  } else {
+    app.innerHTML = `
+      ${m.settings ? `<p class="muted" style="margin:8px 0">Einstellungen: <b style="color:var(--text)">${esc(m.settings)}</b></p>` : ''}
+      <div class="panel train-set">
+        <div class="big-title">Satz ${train.setNo}</div>
+        <div class="muted" style="font-size:.85rem">${sug.prevSet ? `Letztes Mal: ${fmtNum(sug.prevSet.weight)} kg × ${sug.prevSet.reps}` : (train.weight === '' ? 'Trage Gewicht und Wiederholungen ein' : 'Vorschlag aus deinem letzten Satz')}</div>
+        <div class="stepper">
+          <div class="step-label">Gewicht (kg)</div>
+          <div class="step-row">
+            <button type="button" class="btn step" data-step="weight" data-d="-2.5" aria-label="Gewicht verringern">−</button>
+            <input id="t-weight" inputmode="decimal" value="${esc(train.weight === '' ? '' : String(train.weight).replace('.', ','))}" placeholder="kg" aria-label="Gewicht in kg">
+            <button type="button" class="btn step" data-step="weight" data-d="2.5" aria-label="Gewicht erhöhen">＋</button>
+          </div>
+        </div>
+        <div class="stepper">
+          <div class="step-label">Wiederholungen</div>
+          <div class="step-row">
+            <button type="button" class="btn step" data-step="reps" data-d="-1" aria-label="Wiederholungen verringern">−</button>
+            <input id="t-reps" inputmode="numeric" value="${esc(train.reps)}" placeholder="Wdh." aria-label="Wiederholungen">
+            <button type="button" class="btn step" data-step="reps" data-d="1" aria-label="Wiederholungen erhöhen">＋</button>
+          </div>
+        </div>
+      </div>
+      <button class="btn primary block big" id="set-done" style="margin-top:12px">✓ Satz erfolgreich beendet</button>
+      ${doneSets.length ? '<button class="btn block" id="finish" style="margin-top:8px">Training beenden</button>' : ''}
+      ${setList}`;
+
+    const wIn = app.querySelector('#t-weight');
+    const rIn = app.querySelector('#t-reps');
+    wIn.oninput = () => { train.weight = parseNum(wIn.value) ?? ''; };
+    rIn.oninput = () => { const r = parseInt(rIn.value, 10); train.reps = Number.isFinite(r) ? r : ''; };
+    app.querySelectorAll('[data-step]').forEach((b) => {
+      b.onclick = () => {
+        const d = parseFloat(b.dataset.d);
+        if (b.dataset.step === 'weight') {
+          const v = Math.max(0, Math.round(((parseNum(wIn.value) ?? 0) + d) * 100) / 100);
+          train.weight = v;
+          wIn.value = String(v).replace('.', ',');
+        } else {
+          const v = Math.max(0, (parseInt(rIn.value, 10) || 0) + d);
+          train.reps = v;
+          rIn.value = v;
+        }
+      };
+    });
+    app.querySelector('#set-done').onclick = () => {
+      const w = parseNum(wIn.value);
+      const r = parseInt(rIn.value, 10);
+      if (w === null || w < 0 || !Number.isFinite(r) || r <= 0) {
+        toast('Bitte Gewicht und Wiederholungen angeben');
+        return;
+      }
+      let session = todaySession(m);
+      if (!session) {
+        session = { id: uid(), machineId: m.id, date: today(), sets: [], note: '', createdAt: Date.now() };
+        db.sessions.push(session);
+      }
+      session.sets.push({ weight: w, reps: r });
+      save();
+      if (navigator.vibrate) navigator.vibrate(40);
+      train = { machineId: m.id, setNo: session.sets.length, weight: w, reps: r, phase: 'done' };
+      render();
+    };
+  }
+
+  const next = app.querySelector('#next-set');
+  if (next) next.onclick = () => {
+    const n = (todaySession(m)?.sets.length || 0) + 1;
+    const s2 = trainingSuggestion(m, n);
+    // Wurde der letzte Satz gegenüber dem letzten Training angepasst, mit diesen Werten weitermachen,
+    // sonst den entsprechenden Satz vom letzten Mal vorschlagen.
+    const before = trainingSuggestion(m, n - 1).prevSet;
+    const changed = !before || before.weight !== train.weight || before.reps !== train.reps;
+    const useDone = changed || !s2.prevSet;
+    train = { machineId: m.id, setNo: n, weight: useDone ? train.weight : s2.weight, reps: useDone ? train.reps : s2.reps, phase: 'set' };
+    render();
+  };
+  const finish = app.querySelector('#finish');
+  if (finish) finish.onclick = () => {
+    const n = todaySession(m)?.sets.length || 0;
+    train = null;
+    skipStartPopup = true;
+    location.hash = `#/machine/${m.id}`;
+    toast(`Training gespeichert: ${n} ${n === 1 ? 'Satz' : 'Sätze'} 💪`);
+  };
+  app.querySelectorAll('[data-del-set]').forEach((b) => {
+    b.onclick = () => {
+      const session = todaySession(m);
+      if (!session || !confirm(`Satz ${+b.dataset.delSet + 1} löschen?`)) return;
+      session.sets.splice(+b.dataset.delSet, 1);
+      if (!session.sets.length) db.sessions = db.sessions.filter((s) => s !== session);
+      save();
+      train = null;
+      render();
+    };
+  });
+}
+
 // ---------- Ansicht: Daten ----------
 
 function renderSettings() {
@@ -865,18 +1043,25 @@ function notFound() {
 // ---------- Routing ----------
 
 let lastRoute = '';
+let skipStartPopup = false;
 
 function render() {
   const [, view, id] = (location.hash || '#/').split('/');
   const route = `${view}/${id}`;
-  if (route !== lastRoute) {
+  const prevRoute = lastRoute;
+  const entered = route !== prevRoute;
+  if (entered) {
     if (view !== 'studio') studioSearch = '';
     lastRoute = route;
     window.scrollTo(0, 0);
   }
   if (dialog.open) dialog.close();
+  // Beim Öffnen eines Geräts fragen, ob das Training starten soll – nicht beim Zurückkommen aus dem Training.
+  const askStart = entered && !skipStartPopup && prevRoute !== `train/${id}`;
+  skipStartPopup = false;
   if (view === 'studio' && id) renderStudio(id);
-  else if (view === 'machine' && id) renderMachine(id);
+  else if (view === 'machine' && id) renderMachine(id, askStart);
+  else if (view === 'train' && id) renderTrain(id);
   else if (view === 'settings') renderSettings();
   else renderStudios();
 }
